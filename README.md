@@ -29,7 +29,12 @@ https://responsive-internship-sriram.netlify.app/
 - `script.js` — internship data, search, filters, and rendering
 
 ## Screenshots
-Add screenshots of the website here.
+
+### Internship Board
+![Internship Board](internship-board.png)
+
+### Search Filter
+![Search Filter](search-filter.png)
 
 ## Author
 Sri Ram
