@@ -21,6 +21,7 @@ A responsive full-stack internship portal built with HTML, CSS, JavaScript, Node
 - Responsive layout and keyboard-visible focus states.
 - Health endpoint that checks database connectivity.
 - Request logs containing method, path, status and duration, without logging applicant records.
+- Smoke tests for health, listing, not-found and application validation responses.
 
 ## Technology
 
@@ -41,6 +42,7 @@ A responsive full-stack internship portal built with HTML, CSS, JavaScript, Node
     │   └── internship-records-sample.json
     ├── database.js
     ├── server.js
+    ├── smoke-test.js
     ├── package.json
     └── .env.example
 ```
@@ -63,13 +65,7 @@ npm run dev
 
 The API starts at `http://localhost:3000`.
 
-Check backend and database health:
-
-```text
-http://localhost:3000/health
-```
-
-A healthy response includes `"status": "healthy"` and `"database": "connected"`.
+Check backend and database health at `http://localhost:3000/health`. A healthy response includes `"status": "healthy"` and `"database": "connected"`.
 
 ### Frontend
 
@@ -139,20 +135,31 @@ The database and sample internship records are initialized by `backend/database.
 - **Privacy-aware logs:** request bodies, names, emails and portfolio URLs are not written to request logs.
 - **Health endpoint:** checks database connectivity, not just whether the Node process is running.
 
-## Verification checklist
+## Verification
 
-Run these checks before release and record the actual results:
+Start the backend, then in a second terminal run:
 
-- [ ] Browse internship listings and verify search/filter results.
+```bash
+cd backend
+npm run check
+npm run test:smoke
+```
+
+The smoke suite checks:
+- Health and database connectivity.
+- Internship listing and pagination response shape.
+- Unknown internship returns HTTP 404.
+- Missing application fields return HTTP 400.
+- An HTTP portfolio URL is rejected with HTTP 400.
+
+Before release, also perform these manual checks and record the actual results:
+
 - [ ] Submit a valid application and confirm the success message.
 - [ ] Submit the same email for the same internship and confirm HTTP 409.
-- [ ] Submit an invalid email and confirm validation rejects it.
-- [ ] Submit an HTTP portfolio URL and confirm the API rejects it.
-- [ ] Open `/health` and confirm database status is healthy.
 - [ ] Keyboard-test all fields and buttons without a mouse.
 - [ ] Check at 360px viewport width and confirm no horizontal overflow.
-- [ ] Run browser accessibility checks (for example, Lighthouse or axe).
-- [ ] Run a production build/dependency audit and review all reported vulnerabilities.
+- [ ] Run Lighthouse or axe for accessibility and performance.
+- [ ] Run `npm audit` and review all reported vulnerabilities.
 - [ ] Verify the deployed frontend against the deployed backend, not localhost.
 
 ## Security notes
