@@ -1,15 +1,16 @@
 {
-  "name": "backend",
+  "name": "internship-board-api",
   "version": "1.0.0",
-  "description": "",
+  "description": "Express and SQLite API for the Internship Board",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "nodemon server.js"
+    "dev": "nodemon server.js",
+    "check": "node --check server.js && node --check database.js"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "engines": {
+    "node": ">=20"
+  },
   "dependencies": {
     "better-sqlite3": "^13.0.3",
     "cors": "^2.8.6",
