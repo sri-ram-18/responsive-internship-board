@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node server.js",
     "dev": "nodemon server.js",
-    "check": "node --check server.js && node --check database.js"
+    "check": "node --check server.js && node --check database.js && node --check smoke-test.js",
+    "test:smoke": "node smoke-test.js"
   },
   "engines": {
     "node": ">=20"
