@@ -41,6 +41,33 @@
 
     <p id="count" aria-live="polite"></p>
     <section id="internships" aria-label="Internship listings"></section>
+
+    <hr>
+
+    <section aria-labelledby="application-heading">
+      <h2 id="application-heading">Apply for an Internship</h2>
+
+      <form id="application-form">
+        <label for="internship-id">Internship ID</label>
+        <input id="internship-id" name="internshipId"
+          placeholder="Example: INT-101" required>
+
+        <label for="applicant-name">Full name</label>
+        <input id="applicant-name" name="name"
+          type="text" maxlength="100" required>
+
+        <label for="applicant-email">Email</label>
+        <input id="applicant-email" name="email"
+          type="email" maxlength="254" required>
+
+        <label for="portfolio">Portfolio URL (optional)</label>
+        <input id="portfolio" name="portfolioUrl"
+          type="url" placeholder="https://example.com">
+
+        <button type="submit">Submit application</button>
+        <p id="application-status" role="status" aria-live="polite"></p>
+      </form>
+    </section>
   </main>
 </body>
 </html>

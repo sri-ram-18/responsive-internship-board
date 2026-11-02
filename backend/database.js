@@ -1,12 +1,13 @@
 
+
 const Database = require("better-sqlite3");
 const fs = require("fs");
 const path = require("path");
 
-// Create the SQLite database file
 const db = new Database(path.join(__dirname, "internships.db"));
 
-// Create the internships table
+db.pragma("foreign_keys = ON");
+
 db.exec(`
   CREATE TABLE IF NOT EXISTS internships (
     id TEXT PRIMARY KEY,
@@ -18,10 +19,20 @@ db.exec(`
     openings INTEGER NOT NULL CHECK (openings >= 0),
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-  )
+  );
+
+  CREATE TABLE IF NOT EXISTS applications (
+    id TEXT PRIMARY KEY,
+    internship_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    email TEXT NOT NULL,
+    portfolio_url TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (internship_id) REFERENCES internships(id),
+    UNIQUE (internship_id, email)
+  );
 `);
 
-// Load the supplied sample JSON
 const seedPath = path.join(
   __dirname,
   "data",
@@ -29,11 +40,11 @@ const seedPath = path.join(
 );
 
 const seedData = JSON.parse(fs.readFileSync(seedPath, "utf8"));
+
 const internships = Array.isArray(seedData)
   ? seedData
   : seedData.internships;
 
-// Insert sample records only when the table is empty
 const count = db.prepare(
   "SELECT COUNT(*) AS total FROM internships"
 ).get();

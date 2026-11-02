@@ -1,13 +1,38 @@
-
 const express = require("express");
 const { randomUUID } = require("crypto");
+const cors = require("cors");
+const helmet = require("helmet");
+const rateLimit = require("express-rate-limit");
 const db = require("./database");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.use(express.json());
+app.use(helmet());
 
+app.use(cors({
+  origin: [
+    "http://127.0.0.1:5500",
+    "http://localhost:5500",
+    "https://responsive-internship-sriram.netlify.app"
+  ]
+}));
+
+app.use(express.json({ limit: "10kb" }));
+
+app.use("/api", rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 100,
+  standardHeaders: "draft-8",
+  legacyHeaders: false
+}));
+
+const applicationLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 5,
+  standardHeaders: "draft-8",
+  legacyHeaders: false
+});
 // Convert database rows into API response objects
 function formatInternship(row) {
   if (!row) return null;
@@ -219,6 +244,95 @@ app.delete("/api/internships/:id", (req, res) => {
       message: "Internship deleted successfully."
     }
   });
+});
+function validateApplication(body) {
+  const errors = [];
+
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return ["Invalid request body."];
+  }
+
+  const { internshipId, name, email, portfolioUrl } = body;
+
+  if (typeof internshipId !== "string" || !internshipId.trim()) {
+    errors.push("Internship ID is required.");
+  }
+
+  if (typeof name !== "string" || !name.trim() || name.trim().length > 100) {
+    errors.push("Enter a valid name.");
+  }
+
+  if (
+    typeof email !== "string" ||
+    email.length > 254 ||
+    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
+  ) {
+    errors.push("Enter a valid email.");
+  }
+
+  if (portfolioUrl !== undefined && portfolioUrl !== "") {
+    try {
+      if (typeof portfolioUrl !== "string" || portfolioUrl.length > 2048) {
+        throw new Error();
+      }
+
+      const url = new URL(portfolioUrl);
+
+      if (url.protocol !== "https:" || !url.hostname || url.username || url.password) {
+        throw new Error();
+      }
+    } catch {
+      errors.push("Portfolio URL must be a safe HTTPS URL.");
+    }
+  }
+
+  return errors;
+}
+
+app.post("/api/applications", applicationLimiter, (req, res) => {
+  const errors = validateApplication(req.body);
+
+  if (errors.length) {
+    return res.status(400).json({
+      error: {
+        message: "Validation failed.",
+        details: errors
+      }
+    });
+  }
+
+  const internshipId = req.body.internshipId.trim();
+  const name = req.body.name.trim();
+  const email = req.body.email.trim().toLowerCase();
+  const portfolioUrl = req.body.portfolioUrl || null;
+
+  const internship = db.prepare(
+    "SELECT id FROM internships WHERE id = ?"
+  ).get(internshipId);
+
+  if (!internship) {
+    return sendError(res, 404, "Internship not found.");
+  }
+
+  try {
+    db.prepare(`
+      INSERT INTO applications
+        (id, internship_id, name, email, portfolio_url)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(randomUUID(), internshipId, name, email, portfolioUrl);
+
+    return res.status(201).json({
+      data: {
+        message: "Application submitted successfully."
+      }
+    });
+  } catch (error) {
+    if (error.code === "SQLITE_CONSTRAINT_UNIQUE") {
+      return sendError(res, 409, "You have already applied for this internship.");
+    }
+
+    return sendError(res, 500, "Unable to submit application.");
+  }
 });
 
 // Handle invalid JSON
