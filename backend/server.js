@@ -8,15 +8,37 @@ const db = require("./database");
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+const allowedOrigins = (
+  process.env.FRONTEND_ORIGINS ||
+  "http://127.0.0.1:5500,http://localhost:5500,https://responsive-internship-sriram.netlify.app"
+)
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
 app.use(helmet());
 
 app.use(cors({
-  origin: [
-    "http://127.0.0.1:5500",
-    "http://localhost:5500",
-    "https://responsive-internship-sriram.netlify.app"
-  ]
+  origin: allowedOrigins
 }));
+
+// Log request metadata only; never log request bodies or applicant details.
+app.use((req, res, next) => {
+  const startedAt = Date.now();
+
+  res.on("finish", () => {
+    console.log(JSON.stringify({
+      level: "info",
+      event: "http_request",
+      method: req.method,
+      path: req.path,
+      status: res.statusCode,
+      durationMs: Date.now() - startedAt
+    }));
+  });
+
+  next();
+});
 
 app.use(express.json({ limit: "10kb" }));
 
@@ -33,7 +55,31 @@ const applicationLimiter = rateLimit({
   standardHeaders: "draft-8",
   legacyHeaders: false
 });
-// Convert database rows into API response objects
+
+// Health check verifies both the process and its database connection.
+app.get("/health", (req, res) => {
+  try {
+    db.prepare("SELECT 1").get();
+    return res.status(200).json({
+      status: "healthy",
+      database: "connected",
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error(JSON.stringify({
+      level: "error",
+      event: "health_check_failed",
+      message: error.message
+    }));
+
+    return res.status(503).json({
+      status: "unhealthy",
+      database: "disconnected"
+    });
+  }
+});
+
+// Convert database rows into API response objects.
 function formatInternship(row) {
   if (!row) return null;
 
@@ -43,17 +89,15 @@ function formatInternship(row) {
   };
 }
 
-// Standard error response
+// Standard error response.
 function sendError(res, status, message) {
   return res.status(status).json({
-    error: {
-      message
-    }
+    error: { message }
   });
 }
 
-// Validate internship input
-function validateInternship(body, partial = false) {
+// Validate internship input.
+function validateInternship(body) {
   const errors = [];
   const fields = ["title", "domain", "mode", "location", "skills", "openings"];
 
@@ -61,17 +105,11 @@ function validateInternship(body, partial = false) {
     return ["Request body must be a JSON object."];
   }
 
-  if (partial) {
-    for (const key of Object.keys(body)) {
-      if (!fields.includes(key)) {
-        errors.push(`Unknown field: ${key}`);
-      }
-    }
+  for (const key of Object.keys(body)) {
+    if (!fields.includes(key)) errors.push(`Unknown field: ${key}`);
   }
 
   for (const field of fields) {
-    if (partial && !(field in body)) continue;
-
     const value = body[field];
 
     if (["title", "domain", "mode", "location"].includes(field)) {
@@ -80,26 +118,22 @@ function validateInternship(body, partial = false) {
       }
     }
 
-    if (field === "skills") {
-      if (
-        !Array.isArray(value) ||
-        !value.every(skill => typeof skill === "string" && skill.trim())
-      ) {
-        errors.push("skills must be an array of non-empty strings.");
-      }
+    if (field === "skills" && (
+      !Array.isArray(value) ||
+      !value.every((skill) => typeof skill === "string" && skill.trim())
+    )) {
+      errors.push("skills must be an array of non-empty strings.");
     }
 
-    if (field === "openings") {
-      if (!Number.isInteger(value) || value < 0) {
-        errors.push("openings must be a non-negative integer.");
-      }
+    if (field === "openings" && (!Number.isInteger(value) || value < 0)) {
+      errors.push("openings must be a non-negative integer.");
     }
   }
 
   return errors;
 }
 
-// GET: List internships with pagination
+// GET: List internships with pagination.
 app.get("/api/internships", (req, res) => {
   const page = Number(req.query.page ?? 1);
   const limit = Number(req.query.limit ?? 10);
@@ -108,24 +142,17 @@ app.get("/api/internships", (req, res) => {
     !Number.isInteger(page) || page < 1 ||
     !Number.isInteger(limit) || limit < 1 || limit > 100
   ) {
-    return sendError(
-      res,
-      400,
-      "page must be >= 1 and limit must be between 1 and 100."
-    );
+    return sendError(res, 400, "page must be >= 1 and limit must be between 1 and 100.");
   }
 
-  const total = db.prepare(
-    "SELECT COUNT(*) AS total FROM internships"
-  ).get().total;
-
+  const total = db.prepare("SELECT COUNT(*) AS total FROM internships").get().total;
   const rows = db.prepare(`
     SELECT * FROM internships
     ORDER BY created_at DESC, id ASC
     LIMIT ? OFFSET ?
   `).all(limit, (page - 1) * limit);
 
-  res.json({
+  return res.json({
     data: rows.map(formatInternship),
     pagination: {
       page,
@@ -136,29 +163,21 @@ app.get("/api/internships", (req, res) => {
   });
 });
 
-// GET: Get one internship
+// GET: Get one internship.
 app.get("/api/internships/:id", (req, res) => {
-  const row = db.prepare(
-    "SELECT * FROM internships WHERE id = ?"
-  ).get(req.params.id);
+  const row = db.prepare("SELECT * FROM internships WHERE id = ?").get(req.params.id);
 
-  if (!row) {
-    return sendError(res, 404, "Internship not found.");
-  }
-
-  res.json({ data: formatInternship(row) });
+  if (!row) return sendError(res, 404, "Internship not found.");
+  return res.json({ data: formatInternship(row) });
 });
 
-// POST: Create an internship
+// POST: Create an internship.
 app.post("/api/internships", (req, res) => {
   const errors = validateInternship(req.body);
 
   if (errors.length) {
     return res.status(400).json({
-      error: {
-        message: "Validation failed.",
-        details: errors
-      }
+      error: { message: "Validation failed.", details: errors }
     });
   }
 
@@ -168,7 +187,7 @@ app.post("/api/internships", (req, res) => {
     domain: req.body.domain.trim(),
     mode: req.body.mode.trim(),
     location: req.body.location.trim(),
-    skills: JSON.stringify(req.body.skills.map(s => s.trim())),
+    skills: JSON.stringify(req.body.skills.map((skill) => skill.trim())),
     openings: req.body.openings
   };
 
@@ -179,31 +198,19 @@ app.post("/api/internships", (req, res) => {
       (@id, @title, @domain, @mode, @location, @skills, @openings)
   `).run(internship);
 
-  const created = db.prepare(
-    "SELECT * FROM internships WHERE id = ?"
-  ).get(internship.id);
-
-  res.status(201).json({ data: formatInternship(created) });
+  const created = db.prepare("SELECT * FROM internships WHERE id = ?").get(internship.id);
+  return res.status(201).json({ data: formatInternship(created) });
 });
 
-// PUT: Update an existing internship
+// PUT: Replace an existing internship.
 app.put("/api/internships/:id", (req, res) => {
-  const existing = db.prepare(
-    "SELECT * FROM internships WHERE id = ?"
-  ).get(req.params.id);
-
-  if (!existing) {
-    return sendError(res, 404, "Internship not found.");
-  }
+  const existing = db.prepare("SELECT * FROM internships WHERE id = ?").get(req.params.id);
+  if (!existing) return sendError(res, 404, "Internship not found.");
 
   const errors = validateInternship(req.body);
-
   if (errors.length) {
     return res.status(400).json({
-      error: {
-        message: "Validation failed.",
-        details: errors
-      }
+      error: { message: "Validation failed.", details: errors }
     });
   }
 
@@ -217,34 +224,23 @@ app.put("/api/internships/:id", (req, res) => {
     req.body.domain.trim(),
     req.body.mode.trim(),
     req.body.location.trim(),
-    JSON.stringify(req.body.skills.map(s => s.trim())),
+    JSON.stringify(req.body.skills.map((skill) => skill.trim())),
     req.body.openings,
     req.params.id
   );
 
-  const updated = db.prepare(
-    "SELECT * FROM internships WHERE id = ?"
-  ).get(req.params.id);
-
-  res.json({ data: formatInternship(updated) });
+  const updated = db.prepare("SELECT * FROM internships WHERE id = ?").get(req.params.id);
+  return res.json({ data: formatInternship(updated) });
 });
 
-// DELETE: Delete an internship
+// DELETE: Delete an internship.
 app.delete("/api/internships/:id", (req, res) => {
-  const result = db.prepare(
-    "DELETE FROM internships WHERE id = ?"
-  ).run(req.params.id);
+  const result = db.prepare("DELETE FROM internships WHERE id = ?").run(req.params.id);
+  if (result.changes === 0) return sendError(res, 404, "Internship not found.");
 
-  if (result.changes === 0) {
-    return sendError(res, 404, "Internship not found.");
-  }
-
-  res.json({
-    data: {
-      message: "Internship deleted successfully."
-    }
-  });
+  return res.json({ data: { message: "Internship deleted successfully." } });
 });
+
 function validateApplication(body) {
   const errors = [];
 
@@ -273,13 +269,12 @@ function validateApplication(body) {
   if (portfolioUrl !== undefined && portfolioUrl !== "") {
     try {
       if (typeof portfolioUrl !== "string" || portfolioUrl.length > 2048) {
-        throw new Error();
+        throw new Error("Invalid URL");
       }
 
       const url = new URL(portfolioUrl);
-
       if (url.protocol !== "https:" || !url.hostname || url.username || url.password) {
-        throw new Error();
+        throw new Error("Unsafe URL");
       }
     } catch {
       errors.push("Portfolio URL must be a safe HTTPS URL.");
@@ -289,15 +284,13 @@ function validateApplication(body) {
   return errors;
 }
 
+// POST: Submit an internship application.
 app.post("/api/applications", applicationLimiter, (req, res) => {
   const errors = validateApplication(req.body);
 
   if (errors.length) {
     return res.status(400).json({
-      error: {
-        message: "Validation failed.",
-        details: errors
-      }
+      error: { message: "Validation failed.", details: errors }
     });
   }
 
@@ -306,13 +299,8 @@ app.post("/api/applications", applicationLimiter, (req, res) => {
   const email = req.body.email.trim().toLowerCase();
   const portfolioUrl = req.body.portfolioUrl || null;
 
-  const internship = db.prepare(
-    "SELECT id FROM internships WHERE id = ?"
-  ).get(internshipId);
-
-  if (!internship) {
-    return sendError(res, 404, "Internship not found.");
-  }
+  const internship = db.prepare("SELECT id FROM internships WHERE id = ?").get(internshipId);
+  if (!internship) return sendError(res, 404, "Internship not found.");
 
   try {
     db.prepare(`
@@ -322,29 +310,53 @@ app.post("/api/applications", applicationLimiter, (req, res) => {
     `).run(randomUUID(), internshipId, name, email, portfolioUrl);
 
     return res.status(201).json({
-      data: {
-        message: "Application submitted successfully."
-      }
+      data: { message: "Application submitted successfully." }
     });
   } catch (error) {
     if (error.code === "SQLITE_CONSTRAINT_UNIQUE") {
       return sendError(res, 409, "You have already applied for this internship.");
     }
 
+    console.error(JSON.stringify({
+      level: "error",
+      event: "application_insert_failed",
+      code: error.code || "UNKNOWN",
+      message: error.message
+    }));
+
     return sendError(res, 500, "Unable to submit application.");
   }
 });
 
-// Handle invalid JSON
+// Consistent JSON response for unknown API routes.
+app.use("/api", (req, res) => sendError(res, 404, "API route not found."));
+
+// Handle malformed JSON and unexpected errors.
 app.use((err, req, res, next) => {
   if (err instanceof SyntaxError && err.status === 400 && "body" in err) {
     return sendError(res, 400, "Invalid JSON request body.");
   }
 
-  console.error(err);
+  console.error(JSON.stringify({
+    level: "error",
+    event: "unhandled_api_error",
+    name: err.name,
+    message: err.message,
+    method: req.method,
+    path: req.path
+  }));
+
   return sendError(res, 500, "Internal server error.");
 });
 
-app.listen(PORT, () => {
-  console.log(`Internship API running at http://localhost:${PORT}`);
-});
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log(JSON.stringify({
+      level: "info",
+      event: "server_started",
+      port: PORT
+    }));
+  });
+}
+
+module.exports = app;
